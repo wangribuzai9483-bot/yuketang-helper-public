@@ -26,7 +26,7 @@ def main():
     for path in bundle.rglob('*'):
         if path.name in {'.runtime', 'config.json', 'model-settings.json', 'startup-error.log'}:
             raise RuntimeError(f'Private data unexpectedly included: {path.name}')
-    for name in ('LICENSE', 'THIRD_PARTY_NOTICES.md'):
+    for name in ('LICENSE', 'THIRD_PARTY_NOTICES.md', 'DISCLAIMER.md'):
         source = ROOT / name
         if not source.is_file():
             raise RuntimeError(f'Required distribution notice is missing: {name}')

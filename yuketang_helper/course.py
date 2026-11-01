@@ -11,6 +11,7 @@ from playwright.sync_api import Error as BrowserError
 from .config import RUNTIME, allowed_url
 from .homework import HOMEWORK_SCRIPT
 from .llm import is_homework_url
+from .course_identity import matches_course
 
 COURSE_SCRIPT = Path(__file__).with_name('course.js').read_text(encoding='utf-8')
 
@@ -194,7 +195,8 @@ class CourseFlow:
         for page in pages:
             page.main_frame.evaluate(COURSE_SCRIPT)
             snap = page.main_frame.evaluate('() => window.__yktCourse.snapshot()')
-            if snap['course'] == self.owner.config.course_name:
+            if matches_course(self.owner.config,page.url,snap['course']):
+                if hasattr(self.owner,'_adopt_course_name'):self.owner._adopt_course_name(page)
                 self.page = page
                 if page.main_frame.evaluate('() => window.__yktCourse.expandOne()'):
                     return None

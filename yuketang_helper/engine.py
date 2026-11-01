@@ -11,6 +11,8 @@ from .config import Config, RUNTIME, allowed_url
 from .bypass import VerificationBypass
 from .verification import verification_state
 from .windows import Windows
+from .browser_process import OwnedBrowserProcess
+from .course_identity import course_identity, matches_course
 
 PLAYER_SCRIPT = Path(__file__).with_name("player.js").read_text(encoding="utf-8")
 NAVIGATION_SCRIPT = Path(__file__).with_name("navigation.js").read_text(encoding="utf-8")
@@ -21,14 +23,19 @@ ATTENTION = {"blocked", "error", "stalled", "speed-rejected", "autoplay-blocked"
 class Event:
     kind: str
     data: object
+    source: object = None
 
 
 class Engine:
+    STOP_GRACE_SECONDS = 7
     def __init__(self, config: Config, events: queue.Queue, initial_homework_url="", initial_course_url="", initial_exam_url=""):
         self.config = config.validate()
         self.events = events
         self.commands = queue.Queue()
         self.stop = threading.Event()
+        self.finished = threading.Event()
+        self.stop_watchdog_started = False
+        self.browser_process = None
         self.thread = threading.Thread(target=self._run, name="yuketang-browser", daemon=True)
         self.context = None
         self.paused = False
@@ -66,11 +73,26 @@ class Engine:
         self.thread.start()
 
     def command(self, name, value=None):
+        if name=='stop':
+            self.stop.set()
+            with self.window_action_lock:
+                if not self.stop_watchdog_started:
+                    self.stop_watchdog_started=True
+                    threading.Thread(target=self._stop_watchdog,name='browser-stop-watchdog',daemon=True).start()
+            return
         if name in {'restore','minimize'}:
             with self.window_action_lock:
                 self.pending_window_action = name
             return
         self.commands.put((name, value))
+
+    def _stop_watchdog(self):
+        if not self.finished.wait(self.STOP_GRACE_SECONDS):
+            process=self.browser_process
+            if process and process.terminate():
+                self.notice('close-timeout','浏览器关闭未响应，已结束本助手启动的浏览器进程，正在释放会话。')
+            elif not self.finished.is_set():
+                self.notice('close-wait','浏览器仍在结束当前操作，尚未确认关闭；不会影响其他浏览器窗口。')
 
     def restore_window_now(self):
         # UI thread: no Playwright access or browser-worker wait here.
@@ -88,6 +110,7 @@ class Engine:
                 try:
                     info = session.send('SystemInfo.getProcessInfo')['processInfo']
                     self.browser_pid = next(int(item['id']) for item in info if item['type'] == 'browser')
+                    self.browser_process = OwnedBrowserProcess(self.browser_pid)
                 finally:
                     session.detach()
             target = self.windows.locate(self.browser_pid, window['bounds'], self.native_windows.get(window['windowId']))
@@ -168,7 +191,7 @@ class Engine:
         return None
 
     def emit(self, kind, data):
-        self.events.put(Event(kind, data))
+        self.events.put(Event(kind, data, self))
         if kind == "homework" and getattr(self, "course_flow", None):
             self.course_flow.on_homework(data)
 
@@ -214,7 +237,7 @@ class Engine:
             return
         try:
             header = page.locator(".learning-space-header__primary").first
-            if not header.count() or header.inner_text().strip() != self.config.course_name:
+            if not header.count() or not matches_course(self.config,page.url,header.inner_text()):
                 return
             for frame in page.frames:
                 if allowed_url(frame.url):
@@ -240,7 +263,10 @@ class Engine:
                 else:
                     self._set_paused(not self.paused)
             elif name == "options":
-                self.config = value.validate()
+                updated=value.validate()
+                if (updated.course_url,updated.course_name)!=(self.config.course_url,self.config.course_name):
+                    self._switch_course(updated)
+                else:self.config=updated
             elif name == "verification_probe":
                 self.bypass.probe_requested = True
                 self.notice("verification-probe", "已登记导出请求；下次出现安全核验时会把页面结构写入 .runtime。")
@@ -333,6 +359,27 @@ class Engine:
         except Exception as exc:
             self.emit('window_result', {'action':name,'success':False,'message':f'恢复浏览器未完成（{type(exc).__name__}），请再次点击或使用任务栏切回。'})
 
+    def _switch_course(self, updated):
+        self.course_flow.stop('目标课程已更换，原课程流程已停止。')
+        for task in (self.homework,self.exam):
+            if task:task.cancel(quiet=True)
+        self._set_paused(True)
+        self.config=updated
+        self.initial_course_url='';self.initial_homework_url='';self.initial_exam_url=''
+        self.active_page=None;self.navigation_attempts.clear();self.minimized.clear()
+        self.next_clicked_at=None;self.last_bootstrap=0;self.mode='video'
+        page=self.owned_page
+        if not page or page.is_closed():page=self.context.new_page()
+        self.owned_page=page
+        self.emit('mode','video')
+        self.emit('status',{'state':'navigating','title':'正在切换并识别目标课程'})
+        try:
+            page.goto(updated.course_url or updated.entry_url(),wait_until='commit',timeout=15000)
+            self.notice('course-switch','课程入口已切换，将按链接识别当前课程。')
+        except Exception:
+            if not self.stop.is_set():self.notice('course-switch-wait','课程入口正在加载，请在浏览器检查登录或网络。')
+        self._set_paused(False)
+
     def _navigate_landing(self, pages):
         now = time.monotonic()
         for page in reversed(pages):
@@ -371,16 +418,18 @@ class Engine:
             try:
                 header = page.locator(".learning-space-header__primary").first
                 course = header.inner_text().strip() if header.count() else ""
-                if not course:
-                    landing_pages.append(page)
-                elif course == self.config.course_name:
+                outline=not course and '/lms-graph/' not in urlparse(page.url).path
+                if not outline and matches_course(self.config,page.url,course):
                     course_pages.append(page)
+                elif not course:
+                    landing_pages.append(page)
             except Exception:
                 continue
         candidates = []
         if course_pages:
             page = self.active_page if self.active_page in course_pages else course_pages[-1]
             self.active_page = page
+            self._adopt_course_name(page)
             self.remember_window(page)
             for frame in page.frames:
                 if not allowed_url(frame.url):
@@ -421,7 +470,7 @@ class Engine:
             self.course_flow.observe_video(page, result)
         if state == "waiting":
             now = time.monotonic()
-            if not self.course_flow.active and result.get("course") == self.config.course_name:
+            if not self.course_flow.active and matches_course(self.config,page.url,result.get('course')):
                 if now - self.last_bootstrap > 10:
                     self.last_bootstrap = now
                     frame.evaluate("() => window.__yktHelper.firstVideo()")
@@ -447,6 +496,14 @@ class Engine:
                 self.notice("no-directory", "当前目录结构未识别，请手动选择下一视频。")
             elif next_state == "next-pending" and self.next_clicked_at and time.monotonic() - self.next_clicked_at > 20:
                 self.notice("next-timeout", "下一视频没有加载，请恢复窗口检查。")
+
+    def _adopt_course_name(self, page):
+        if not course_identity(self.config.course_url):return
+        header=page.locator('.learning-space-header__primary').first
+        name=header.inner_text().strip() if header.count() else ''
+        if name and name!=self.config.course_name:
+            self.config=replace(self.config,course_name=name)
+            self.emit('course_context',{'course_name':name,'course_url':self.config.course_url})
 
     def _acquire_lock(self):
         RUNTIME.mkdir(exist_ok=True)
@@ -480,6 +537,7 @@ class Engine:
 
     def _run(self):
         try:
+            if self.stop.is_set():return
             from playwright.sync_api import sync_playwright
             self._acquire_lock()
             with sync_playwright() as playwright:
@@ -496,6 +554,7 @@ class Engine:
                 if self.config.browser != "chromium":
                     options["channel"] = self.config.browser
                 self.context = playwright.chromium.launch_persistent_context(**options)
+                self.context.on('close',lambda:self.stop.set())
                 self.bypass.install(self.context, stealth=self.config.stealth)
                 from .homework import HomeworkSession
                 self.homework = HomeworkSession(self)
@@ -503,6 +562,8 @@ class Engine:
                 self.exam = ExamSession(self)
                 self.owned_page = self.context.pages[0] if self.context.pages else self.context.new_page()
                 self.remember_window(self.owned_page)
+                if self.stop.is_set():
+                    self.context.close();return
                 self.emit("running", True)
                 self.notice("login", "浏览器已打开，请自行登录雨课堂；登录信息仅保存在本地专用浏览器目录。")
                 self._open_entry()
@@ -562,12 +623,20 @@ class Engine:
             else:
                 message = (f"启动或运行失败（{type(exc).__name__}）。请确认所选浏览器已安装；"
                            "Chromium 可通过 .venv\\Scripts\\python.exe -m playwright install chromium 安装。")
-            self.emit("error", message)
+            if not self.stop.is_set():self.emit("error", message)
         finally:
-            if self.exam:self.exam.close()
-            if self.homework:
-                self.homework.close()
+            self.stop.set()
+            for task in (self.course_flow,self.exam,self.homework):
+                if task:
+                    try:
+                        if task is self.course_flow:task.stop('浏览器已关闭，课程流程已停止，可重新启动。')
+                        else:task.close()
+                    except Exception:
+                        self.notice('cleanup-error','浏览器任务清理遇到问题，已恢复启动入口。')
             self.context = None
-            if self.profile_lock:
-                self.profile_lock.close()
+            for resource in (self.browser_process,self.profile_lock):
+                if resource:
+                    try:resource.close()
+                    except Exception:pass
             self.emit("running", False)
+            self.finished.set()

@@ -7,6 +7,7 @@ import tkinter as tk
 from tkinter import messagebox, scrolledtext, ttk
 
 from .config import Config, RUNTIME
+from .course_identity import course_identity
 from .engine import Engine, Event
 from .homework_gui import HomeworkPanel
 from .learning import LearningService
@@ -43,6 +44,8 @@ class App:
         self.learning = LearningService(notify=lambda data:self.events.put(Event('learning',data)))
         self.closing = False
         self.starting = False
+        self.stopping = False
+        self.browser_running = False
         self.verification_notice = None
         self.verification_notice_status = tk.StringVar()
         self.restore_request = 0
@@ -158,8 +161,8 @@ class App:
         try:
             updated = self.read_config()
             if self.engine and self.engine.thread.is_alive():
-                if any(getattr(updated, key) != getattr(self.config, key) for key in ("browser", "login_url", "course_name", "course_url")):
-                    messagebox.showinfo("需要重启", "修改浏览器、入口、目标课程或直达地址后，请先停止，再重新启动。")
+                if any(getattr(updated, key) != getattr(self.config, key) for key in ("browser", "login_url")):
+                    messagebox.showinfo("需要重启", "修改浏览器或登录入口后，请先停止，再重新启动。课程链接可以直接应用切换。")
                     return False
                 self.engine.command("options", updated)
             updated.save()
@@ -268,10 +271,24 @@ class App:
                 self.verification_notice = None
 
     def stop(self):
+        if not self.engine or not self.engine.thread.is_alive():
+            self._browser_stopped()
+            return
+        self.stopping = True
         self.send("stop")
         self.stop_button.configure(state="disabled")
         self.pause_button.configure(state="disabled")
         self.status.set("正在关闭浏览器…")
+
+    def _browser_stopped(self):
+        self.starting=False;self.stopping=False;self.browser_running=False;self.restore_pending=False
+        self.close_verification_notice()
+        set_video_active(self,False)
+        self.start_button.configure(state='normal')
+        self.pause_button.configure(state='disabled',text='暂停自动播放')
+        self.stop_button.configure(state='disabled')
+        self.status.set('开始一段学习')
+        for page in ('video','course','homework'):self.sidebar.set_running(page,False)
 
     def log(self, message):
         line = f"[{datetime.now():%H:%M:%S}] {message}\n"
@@ -325,6 +342,10 @@ class App:
                 event = self.events.get_nowait()
             except queue.Empty:
                 break
+            if getattr(event,'source',None) is not None and event.source is not self.engine:
+                continue
+            if self.stopping and event.kind in {'status','paused','mode'}:
+                continue
             if event.kind == "log":
                 self.log(event.data)
             elif event.kind == "status":
@@ -338,15 +359,21 @@ class App:
                     self.course_progress.set(self.progress_text.get())
             elif event.kind == "running":
                 self.starting = False
+                self.browser_running=bool(event.data)
                 set_video_active(self, bool(event.data and self.engine and self.engine.mode == 'video'))
                 self.sidebar.set_running("video", bool(event.data and self.engine and self.engine.mode == "video"))
                 self.start_button.configure(state="disabled" if event.data else "normal")
                 for button in (self.pause_button, self.stop_button):
                     button.configure(state="normal" if event.data else "disabled")
                 if not event.data:
-                    self.close_verification_notice()
-                    self.status.set("已停止")
-                    self.pause_button.configure(text="暂停自动播放")
+                    self._browser_stopped()
+            elif event.kind=='course_context':
+                data=event.data
+                if course_identity(data['course_url'])==course_identity(self.vars['course_url'].get()):
+                    self.vars['course_name'].set(data['course_name'])
+                    self.config=replace(self.config,course_name=data['course_name'])
+                    try:self.config.save()
+                    except OSError:self.log('已识别当前课程名称，配置暂未保存。')
             elif event.kind == "paused":
                 self.pause_button.configure(text="恢复自动播放" if event.data else "暂停自动播放")
                 if event.data:
@@ -391,6 +418,8 @@ class App:
                 self.sidebar.set_running("video", event.data == "video" and bool(self.engine and self.engine.thread.is_alive()))
                 self.log('已进入考试填写模式，交卷请在网页手动操作。' if event.data=='exam' else
                          "已进入作业模式，视频自动播放已暂停。" if event.data == "homework" else "已返回视频模式。")
+        if (self.starting or self.stopping or self.browser_running) and (not self.engine or not self.engine.thread.is_alive()):
+            self._browser_stopped()
         if self.closing and (not self.engine or not self.engine.thread.is_alive()):
             self.root.destroy()
             return

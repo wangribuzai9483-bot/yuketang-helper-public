@@ -15,6 +15,7 @@ from .secrets import KeyStore
 from .ocr import RenderedTextReader
 from .verification import VERIFICATION_SCRIPT, verification_state
 from .submission import SubmissionMonitor
+from .course_identity import matches_course
 
 HOMEWORK_SCRIPT = VERIFICATION_SCRIPT + '\n' + Path(__file__).with_name("homework.js").read_text(encoding="utf-8")
 
@@ -96,7 +97,7 @@ class HomeworkSession:
         if target and actual and target[1] != actual[1]:
             return False
         header = page.locator(".learning-space-header__primary").first
-        return not header.count() or header.inner_text().strip() == self.owner.config.course_name
+        return not header.count() or matches_course(self.owner.config,page.url,header.inner_text())
 
     def current(self, resolve_text=True):
         pages = [p for p in self.owner.context.pages if self.pinned_page is None or p == self.pinned_page]

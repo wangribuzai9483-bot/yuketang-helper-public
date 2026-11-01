@@ -8,7 +8,8 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 TOP = {'.gitignore', '.gitattributes', 'AGENTS.md', 'README.md', 'ROADMAP.md', 'app.py',
        'start.ps1', '启动雨课堂助手.cmd', 'requirements.txt', 'requirements-build.txt',
-       'config.example.json', 'model-settings.example.json', 'LICENSE', 'THIRD_PARTY_NOTICES.md'}
+       'config.example.json', 'model-settings.example.json', 'LICENSE', 'THIRD_PARTY_NOTICES.md',
+       'DISCLAIMER.md'}
 DIRS = {'yuketang_helper', 'tests', 'tools', 'packaging', 'docs'}
 PATTERNS = [r'\bsk-[A-Za-z0-9_-]{20,}', r'\bgh[pousr]_[A-Za-z0-9]{25,}',
             r'-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----']

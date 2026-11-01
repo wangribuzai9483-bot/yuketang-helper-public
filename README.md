@@ -4,7 +4,9 @@ Windows 桌面应用。视频页支持二倍速、续播和最小化；“作业
 
 个人开发的非官方工具，与雨课堂平台运营方无隶属关系。当前为测试版，真实页面可能需要适配；首次识别与填写结果应由用户核对。
 
-[Windows 测试包下载](https://github.com/wangribuzai9483-bot/yuketang-helper-public/releases) · [MIT 许可证](LICENSE) · [素材与第三方声明](THIRD_PARTY_NOTICES.md)
+> **使用范围与免责声明（摘要）**：本软件仅用于使用者本人账号下的学习辅助。**严禁用于任何违法用途**，包括侵入或破坏平台与服务器、批量注册或撞库、盗用他人账号与会话、代考代刷、绕过付费与安全机制、商业转售等；使用者须遵守所在学校规定与平台用户协议，并自行承担账号受限、成绩处理等后果。软件按“现状”提供，不保证识别、填写或判分正确。完整条款见 [DISCLAIMER.md](DISCLAIMER.md)。
+
+[Windows 测试包下载](https://github.com/wangribuzai9483-bot/yuketang-helper-public/releases) · [MIT 许可证](LICENSE) · [素材与第三方声明](THIRD_PARTY_NOTICES.md) · [使用范围与免责声明](DISCLAIMER.md)
 
 新版左侧导航包含课程流程、作业填写、视频播放、模型设置、运行日志、记录与经验和期末考试。各页底部的详情入口收纳配置和原有操作，打开、返回及分组折叠均采用统一的轻量动画。模型设置仍复用原来的密钥保存与连接测试逻辑；日志默认展示重要事件，完整日志在详情中查看。
 
@@ -31,15 +33,17 @@ Windows 默认使用 64px 暖白自定义标题栏，沿用系统窗口的最小
 .\.venv\Scripts\python.exe -m playwright install chromium
 ```
 
-界面的播放速度、静音、续播、自动最小化、暂停恢复选项都通过 **应用设置** 生效；修改浏览器、入口、目标课程或直达地址需停止后重启。更新程序代码后，应关闭整个旧助手窗口，再双击启动文件。
+界面的播放速度、静音、续播、自动最小化、暂停恢复选项都通过 **应用设置** 生效。更换课程链接可直接应用，程序停止原课程任务，在同一浏览器内打开新课程，保留登录会话；修改浏览器或登录入口仍需停止后重启。更新程序代码后，应关闭整个旧助手窗口，再双击启动文件。
 
 旧版本若停在 `about:blank`，并在 45 秒后提示“入口尚未加载完成”，本次已修复启动时的错误请求拦截。请关闭旧助手及其打开的浏览器后重新启动；登录目录与课程进度保留。后续连接失败时，日志会显示具体网络错误码或超时原因。
 
-请填写自己的学校门户、课程名称和视频直达地址。视频页 `/ai-workspace/lms-graph/.../video/...` 和大纲页 `/v2/web/studentLog/...` 是不同入口，直达地址应优先填写视频页完整网址，保留 `is_chapter`、`node_id` 等参数。更换课程时请同时修改课程名和直达地址。
+请填写自己的学校门户和课程直达地址。视频页 `/ai-workspace/lms-graph/.../video/...` 和大纲页 `/v2/web/studentLog/...` 是不同入口，直达地址应优先填写视频页完整网址，保留 `is_chapter`、`node_id` 等参数。有直达地址时按学校域名及课程 ID 匹配，课程名自动从页面读取；未提供可识别课程 ID 的地址时，才使用课程名匹配。
 
 ## 已实现的行为
 
 - 使用本地独立浏览器目录保存登录会话，后续启动可复用仍有效的登录状态。
+- 课程识别与播放器适配分开：同类学习空间页面复用 `.leaf-item` 目录和 `.xt_video_player` 播放器，不按课程名称编写独立模块。不同学校版本、外部播放器及特殊页面仍需单独验证。
+- 停止或手动关闭本助手浏览器后恢复课程链接及启动按钮；遗漏结束事件时也核对工作线程状态。关闭超时 7 秒会尝试结束预先绑定的本助手浏览器进程，再释放会话，不按进程名称关闭其他浏览器。
 - 通过播放器自带倍速菜单设置速度，补齐 PC 播放器所需的鼠标进入和移动事件，更新播放器内部速度后再核对视频实际速度，避免其定时器恢复为 1 倍速。真正拒绝设置时停止反复修改，保留播放检查并显示实际速度。
 - 识别源码中的 `.leaf-item` 课程目录，只续播标签为“视频”的项目，跳过作业、讨论、考试。
 - 支持真实窗口最小化/恢复；界面持续显示播放时间、速度和状态。
@@ -169,6 +173,8 @@ Windows 默认使用 64px 暖白自定义标题栏，沿用系统窗口的最小
 | `启动雨课堂助手.cmd` / `start.ps1` | 一键启动和依赖安装 |
 | `app.py` / `yuketang_helper/gui.py` | 控制窗口 |
 | `yuketang_helper/engine.py` | 浏览器会话、窗口控制和轮询 |
+| `yuketang_helper/course_identity.py` | 学校域名和课程 ID 匹配、课程名后备匹配 |
+| `yuketang_helper/browser_process.py` | 保留本助手浏览器进程句柄，处理关闭超时 |
 | `yuketang_helper/player.js` | 播放、倍速、目录和弹窗适配 |
 | `yuketang_helper/homework.py` / `homework.js` | 作业状态机、识别和网页填写 |
 | `yuketang_helper/course.py` / `course.js` | 统一课程调度、按目录切换、定位作业第一题、保存课程位置 |
@@ -208,6 +214,10 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\start.ps1 -Check
 
 # 在临时未登录 Edge 中验证真实窗口最小化和媒体播放
 .\.venv\Scripts\python.exe -m tests.smoke_windows
+
+# 两门本地模拟课程的二倍速、最小化、同浏览器换课与关闭超时恢复
+.\.venv\Scripts\python.exe -m unittest tests.test_video_recovery -v
+.\.venv\Scripts\python.exe -m tests.smoke_video_recovery_windows
 
 # 在临时未登录 Edge 中验证最小化时的 Windows OCR 和模拟模型填写
 .\.venv\Scripts\python.exe -m tests.smoke_homework_windows
