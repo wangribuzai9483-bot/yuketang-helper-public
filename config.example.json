@@ -1,0 +1,18 @@
+{
+  "login_url": "https://www.yuketang.cn/web",
+  "course_name": "我的课程",
+  "course_url": "",
+  "browser": "msedge",
+  "speed": 2.0,
+  "muted": true,
+  "auto_next": true,
+  "auto_minimize": false,
+  "resume_paused": true,
+  "stall_seconds": 25,
+  "next_delay_seconds": 5,
+  "verification_bypass": "solve",
+  "bypass_attempts": 3,
+  "bypass_slider_gain": 0,
+  "stealth": true,
+  "answer_source": "auto"
+}

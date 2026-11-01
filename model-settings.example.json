@@ -1,0 +1,12 @@
+{
+  "base_url": "",
+  "model": "",
+  "timeout": 90,
+  "json_mode": false,
+  "auto_submit": false,
+  "review_summary": false,
+  "review_techniques": false,
+  "homework_url": "",
+  "exam_url": "",
+  "instructions": "用中文回答。简答题提供完整、直接的答案。"
+}
