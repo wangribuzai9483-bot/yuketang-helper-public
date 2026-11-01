@@ -400,7 +400,10 @@ class CourseFlowTests(unittest.TestCase):
         from html import escape
         from tests.test_player import LeafParser, ROOT
         parser = LeafParser()
-        parser.feed((ROOT / '源码.txt').read_text(encoding='utf-8-sig'))
+        snapshot = ROOT / '源码.txt'
+        if not snapshot.exists():
+            self.skipTest('本地页面快照未包含在公开快照中')
+        parser.feed(snapshot.read_text(encoding='utf-8-sig'))
         html = ''.join('<div class="leaf-item'+(' is-active' if item['active'] else '')+'"><span class="leaf-item-tag">'+
                        escape(item['tag'])+'</span><span class="leaf-item-title">'+escape(item['title'])+'</span></div>' for item in parser.items)
         self.page.set_content(html)

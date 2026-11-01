@@ -254,7 +254,10 @@ class BrowserTests(unittest.TestCase):
 
     def test_loaded_real_source_directory(self):
         parser = LeafParser()
-        parser.feed((ROOT / "源码.txt").read_text(encoding="utf-8"))
+        snapshot = ROOT / "源码.txt"
+        if not snapshot.exists():
+            self.skipTest("本地页面快照未包含在公开快照中")
+        parser.feed(snapshot.read_text(encoding="utf-8"))
         videos = [item for item in parser.items if item["tag"] == "视频"]
         self.assertEqual(len(videos), 33)
         self.assertEqual(len(parser.items), 65)
