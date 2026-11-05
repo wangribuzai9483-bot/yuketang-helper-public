@@ -16,6 +16,7 @@ from .course_identity import course_identity, matches_course
 
 PLAYER_SCRIPT = Path(__file__).with_name("player.js").read_text(encoding="utf-8")
 NAVIGATION_SCRIPT = Path(__file__).with_name("navigation.js").read_text(encoding="utf-8")
+OVERVIEW_SCRIPT = Path(__file__).with_name("overview.js").read_text(encoding="utf-8")
 ATTENTION = {"blocked", "error", "stalled", "speed-rejected", "autoplay-blocked"}
 
 
@@ -383,11 +384,49 @@ class Engine:
     def _navigate_landing(self, pages):
         now = time.monotonic()
         for page in reversed(pages):
-            if now - self.navigation_attempts.get(page, -float("inf")) < 12:
-                continue
             current = urlparse(page.url)
             target_url = self.initial_course_url or self.config.course_url
             target = urlparse(target_url) if target_url else None
+            if ('/studentLog/' in current.path and (not target or '/studentLog/' in target.path)
+                    and (not target or (course_identity(target_url) and course_identity(page.url)==course_identity(target_url)))):
+                # A studentLog address is a course overview, not a player URL.
+                # Even with a configured direct address, enter its chapter/video.
+                if not target:
+                    header=page.locator('.header-main .title-line .classroom-ellipsis:not(.classroom-title-tag) .title-inner-wrapper').first
+                    if not header.count() or not matches_course(self.config,page.url,header.inner_text()):continue
+                result = page.main_frame.evaluate(OVERVIEW_SCRIPT)
+                if result['state'] in {'overview-frame','overview-locked'}:
+                    overview_result=result
+                    for frame in page.frames:
+                        if frame==page.main_frame or not allowed_url(frame.url):continue
+                        if course_identity(frame.url)!=course_identity(page.url):continue
+                        if not frame.frame_element().is_visible():continue
+                        frame_result=frame.evaluate(OVERVIEW_SCRIPT)
+                        if frame_result['state'] not in {'overview-frame','overview-locked'}:
+                            result=frame_result;break
+                        if overview_result['state']=='overview-frame':overview_result=frame_result
+                    else:result=overview_result
+                if result['state']=='overview-video-ready':
+                    frame=next((item for item in page.frames if item!=page.main_frame and
+                                allowed_url(item.url) and course_identity(item.url)==course_identity(page.url) and
+                                item.frame_element().is_visible() and
+                                item.evaluate('() => !!window.__yktOverviewEntry?.pending && window.__yktOverviewEntry.pending.kind === "video"')),
+                               None)
+                    if frame is None:
+                        result={'state':'overview-attention','title':'视频入口已变化，请检查学习内容目录'}
+                    else:
+                        try:
+                            frame.locator('.leaf-detail').nth(result['index']).click(timeout=8000)
+                            result={'state':'overview-video-clicked','title':'正在从学习内容打开视频'}
+                        except Exception:
+                            frame.evaluate('() => { if (window.__yktOverviewEntry) window.__yktOverviewEntry.pending = null }')
+                            result={'state':'overview-attention','title':'视频入口点击未完成，请检查课程是否允许继续学习'}
+                self.emit('status',{'state':'blocked' if result['state'] in {'overview-blocked','overview-attention','overview-locked'} else 'navigating',
+                                    'title':result['title']})
+                self.notice(result['state'],result['title'])
+                return True
+            if now - self.navigation_attempts.get(page, -float("inf")) < 12:
+                continue
             # Do not interrupt QR/SSO login. The official login's `next` parameter
             # handles its first redirect; this repairs redirects to the dashboard.
             authenticated_route = current.path.rstrip("/") == "/v2/web" or current.path.startswith((

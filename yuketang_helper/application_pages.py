@@ -1,6 +1,7 @@
 """Visual pages backed by the App's existing configuration and task commands."""
 import tkinter as tk
-from tkinter import ttk, scrolledtext
+from tkinter import ttk
+from . import scroll_widgets as scrolledtext
 from tkinter import font as tkfont
 from .page_components import FeaturePage, Disclosure
 from .ui_shell import ActionButton, FlowConnector, InputCard, PlaybackProgress, PrimaryButton, BG, LINE, INK, MUTED, rounded_rect
@@ -112,17 +113,24 @@ def build_video(app, parent, answer_labels):
     for index, (key, title) in enumerate((('login_url', '登录入口'), ('course_name', '目标课程'), ('course_url', '课程直达链接'))):
         ttk.Label(form, text=title).grid(row=index, column=0, sticky='w', padx=(0, 18), pady=9)
         ttk.Entry(form, textvariable=app.vars[key]).grid(row=index, column=1, sticky='ew', pady=9)
-    row = ttk.Frame(settings)
-    row.pack(fill='x', pady=16)
-    for key, title, choices in [('browser','浏览器',('msedge','chrome','chromium')), ('speed','播放速度',('1.0','1.25','1.5','2.0'))]:
-        ttk.Label(row, text=title).pack(side='left', padx=(0, 9))
-        ttk.Combobox(row, textvariable=app.vars[key], values=choices, state='readonly', width=12).pack(side='left', padx=(0, 20))
+    ttk.Label(form, text='浏览器').grid(row=3, column=0, sticky='w', padx=(0, 18), pady=9)
+    selectors = ttk.Frame(form)
+    selectors.grid(row=3, column=1, sticky='w', pady=9)
+    ttk.Combobox(selectors, textvariable=app.vars['browser'],
+                 values=('msedge', 'chrome', 'chromium'), state='readonly',
+                 width=11, style='Polished.TCombobox').pack(side='left')
+    ttk.Label(selectors, text='播放速度').pack(side='left', padx=(22, 12))
+    ttk.Combobox(selectors, textvariable=app.vars['speed'],
+                 values=('1.0', '1.25', '1.5', '2.0'), state='readonly',
+                 width=11, style='Polished.TCombobox').pack(side='left')
     options = ttk.Frame(settings)
     options.pack(fill='x', pady=8)
     for index, (key, title) in enumerate((('muted','静音播放'),('auto_next','自动播放下一视频'),('auto_minimize','开始播放后最小化'),('resume_paused','恢复意外暂停'),('bypass','自动处理安全核验'))):
         ttk.Checkbutton(options, text=title, variable=app.vars[key]).grid(row=index//2, column=index%2, sticky='w', padx=(0, 24), pady=7)
     ttk.Label(settings, text='选择题答案来源', foreground=MUTED).pack(anchor='w', pady=(15, 6))
-    ttk.Combobox(settings, textvariable=app.vars['answer_source'], values=tuple(answer_labels.values()), state='readonly').pack(fill='x')
+    ttk.Combobox(settings, textvariable=app.vars['answer_source'],
+                 values=tuple(answer_labels.values()), state='readonly',
+                 style='Polished.TCombobox').pack(fill='x')
     actions = ttk.Frame(settings)
     actions.pack(fill='x', pady=18)
     ActionButton(actions, '应用设置', app.apply, primary=True).pack(side='left', padx=(0, 8))
@@ -164,7 +172,7 @@ def build_course(app, parent):
         ActionButton(row, title, lambda name=command: app.send(name)).pack(side='left', padx=(0, 8))
     fold = Disclosure(settings, '流程规则与注意事项', height=190)
     fold.pack(fill='x', pady=10)
-    ttk.Label(fold.body, text='从网页当前目录位置继续，保留已有答案和提交记录。\n\n未开启自动提交时，作业填写后等待你核对和手动提交。\n\n遇到讨论、考试、锁定内容或错误时暂停；处理后可继续。\n\n课程位置按课程隔离保存，浏览器仍需使用有效登录会话。',
+    ttk.Label(fold.body, text='从网页当前目录位置继续，保留已有答案和提交记录。\n\n未开启自动提交时，作业填写后等待你核对和手动提交。\n\n讨论项会略过且不会代替发言；遇到考试、锁定内容或错误时暂停。\n\n课程位置按课程隔离保存，浏览器仍需使用有效登录会话。',
               foreground=MUTED, justify='left', wraplength=650).pack(anchor='w', padx=12, pady=10)
 
 

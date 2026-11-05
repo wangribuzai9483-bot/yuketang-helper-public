@@ -1,6 +1,6 @@
 // Directory navigation only; progress and submission remain owned by the website.
 (() => {
-  if (window.__yktCourse?.version === 1) return;
+  if (window.__yktCourse?.version === 2) return;
   const text = el => (el?.textContent || '').replace(/\s+/g, ' ').trim();
   const visible = el => !!el && el.getClientRects().length > 0 &&
     el.checkVisibility({checkOpacity:true,checkVisibilityCSS:true});
@@ -10,7 +10,7 @@
     const label = text(el.querySelector('.leaf-item-tag'));
     const title = text(el.querySelector('.leaf-item-title'));
     return {el,index,key:JSON.stringify([index,label,title]),title,label,
-      kind:label==='视频'?'video':label==='作业'?'homework':'unsupported',
+      kind:label==='视频'?'video':label==='作业'?'homework':label==='讨论'?'discussion':'unsupported',
       locked:disabled(el),active:el.classList.contains('is-active')};
   });
   const publicItem = ({el,...item}) => item;
@@ -19,7 +19,7 @@
   let lastClick = '';
   const expanded = new WeakSet();
   window.__yktCourse = {
-    version:1,
+    version:2,
     resetNavigation() { lastClick=''; },
     snapshot() {
       const all=items(), selected=all.filter(item=>item.active);
@@ -37,13 +37,19 @@
       const all=items(), selected=all.filter(item=>item.active);
       if (selected.length!==1 || selected[0].key!==expected) return {state:'directory-changed'};
       if (blocked()) return {state:'blocked-dialog'};
-      const next=all[selected[0].index+1];
-      if (!next) return {state:'complete'};
+      const skipped=[];
+      let next=null;
+      for (const item of all.slice(selected[0].index+1)) {
+        if (item.kind!=='discussion') { next=item; break; }
+        if (item.locked) return {state:'locked',item:publicItem(item)};
+        skipped.push(publicItem(item));
+      }
+      if (!next) return {state:'complete',skipped};
       if (next.kind==='unsupported') return {state:'unsupported',item:publicItem(next)};
       if (next.locked) return {state:'locked',item:publicItem(next)};
       if (lastClick===expected) return {state:'already-clicked'};
       lastClick=expected; next.el.click();
-      return {state:'clicked',item:publicItem(next)};
+      return {state:'clicked',item:publicItem(next),skipped};
     },
     first() {
       if (blocked()) return {state:'blocked-dialog'};

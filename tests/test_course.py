@@ -265,13 +265,30 @@ class CourseFlowTests(unittest.TestCase):
             self.run_until(lambda: self.flow.stage == 'video', end_video=False)
             self.assertEqual(self.page.evaluate('window.navClicks'), [1,2])
 
-    def test_discussion_and_exam_are_not_silently_skipped(self):
+    def test_discussion_between_videos_is_skipped_without_opening_it(self):
+        self.page.evaluate('''() => {
+          catalogue.splice(1, 4, ['discussion','讨论一',301], ['discussion','讨论二',302],
+            ['video','视频二',101]);
+          renderDirectory();
+        }''')
+        self.flow.start(ModelSettings(base_url='http://localhost:1', model='unused'))
+        self.step(end_video=False)
+        self.page.evaluate('window.forceEnded=true')
+        self.run_until(lambda: self.flow.stage == 'video' and self.page.url.startswith(BASE+'video/101'),
+                       end_video=False)
+        self.assertEqual(self.page.evaluate('window.navClicks'), [3])
+        self.assertEqual(self.flow.item['title'], '视频二')
+
+    def test_locked_discussion_and_exam_still_pause(self):
         for kind in ('discussion','exam'):
             with self.subTest(kind=kind):
                 self.page.evaluate('kind=>{catalogue[1][0]=kind;renderDirectory()}', kind)
+                if kind == 'discussion':
+                    self.page.evaluate('catalogue[1][3]=true;renderDirectory()')
                 self.flow.start(ModelSettings(base_url='http://localhost:1', model='unused', auto_submit=True))
                 self.run_until(lambda: self.flow.stage == 'blocked')
                 self.assertEqual(self.page.evaluate('window.navClicks'), [])
+                self.page.evaluate('catalogue[1][3]=false;renderDirectory()')
 
     def test_locked_homework_is_not_clicked(self):
         self.page.evaluate('catalogue[1][3]=true;renderDirectory()')

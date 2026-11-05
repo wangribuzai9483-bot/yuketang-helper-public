@@ -255,7 +255,9 @@ class CourseFlow:
             self.transition = {'target': result['item'], 'before': before}
             self.stage = 'navigating'
             self.deadline = time.monotonic() + 60
-            self.emit(f'正在进入下一项：{result["item"]["title"]}')
+            skipped = result.get('skipped') or []
+            prefix = f'已略过 {len(skipped)} 个讨论项（未代替发言）；' if skipped else ''
+            self.emit(f'{prefix}正在进入下一项：{result["item"]["title"]}')
         elif state == 'complete':
             self._hold('已到课程目录末尾；请在雨课堂查看实际完成记录。', 'complete')
         else:

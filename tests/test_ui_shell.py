@@ -1,8 +1,11 @@
 import tkinter as tk
+import time
 import unittest
 from unittest.mock import patch
+from PIL import Image, ImageTk
 
 from yuketang_helper.gui import App
+from yuketang_helper.ui_shell import Backdrop
 
 
 class UiShellTests(unittest.TestCase):
@@ -97,6 +100,89 @@ class UiShellTests(unittest.TestCase):
         generation = sidebar.animation_generation['homework']
         sidebar._hover('homework', True)
         self.assertEqual(sidebar.animation_generation['homework'], generation)
+
+    def test_backdrops_share_workspace_image_and_clip_without_black_padding(self):
+        # Sidebar collapse grows the viewport before its debounced repaint.
+        self.root.deiconify()
+        workspace = tk.Canvas(self.root, width=80, height=80)
+        workspace.place(x=0, y=0, width=80, height=80)
+        workspace.background_scaled = Image.new('RGB', (40, 40), '#F1F0EC')
+        backdrop = Backdrop(workspace, workspace)
+        backdrop.place(x=20, y=20, width=60, height=60)
+        self.root.update_idletasks()
+        backdrop.refresh()
+        pixels = ImageTk.getimage(backdrop.photo).convert('RGB')
+        self.assertEqual(pixels.size, (40, 40))
+        self.assertEqual(backdrop.coords(backdrop.image_item), [-20.0, -20.0])
+        self.assertEqual(backdrop.cget('bg'), '#FFFFFF')
+        second = Backdrop(workspace, workspace)
+        second.place(x=0, y=0, width=20, height=20)
+        self.root.update_idletasks()
+        second.refresh()
+        self.assertIs(second.photo, backdrop.photo)
+        workspace.background_scaled = Image.new('RGB', (80, 80), '#F1F0EC')
+        backdrop.refresh()
+        pixels = ImageTk.getimage(backdrop.photo).convert('RGB')
+        self.assertEqual(pixels.getpixel((59, 59)), (241, 240, 236))
+
+    def test_sidebar_animates_layout_and_reverses_from_current_width(self):
+        self.root.geometry('1180x820')
+        self.root.deiconify()
+        self.app.show_page('course')
+        deadline = time.monotonic()+.4
+        while time.monotonic() < deadline:
+            self.root.update()
+            time.sleep(.005)
+        sidebar = self.app.sidebar
+        widths = []
+        exposures = []
+        title = self.app.course_page.title_label
+        title.bind('<Expose>', lambda event: exposures.append((event.x, event.width)), add='+')
+        def resized(event):
+            if event.widget is not sidebar:
+                return
+            widths.append(sidebar.winfo_width())
+        sidebar.bind('<Configure>', resized, add='+')
+        reversal = []
+        def reverse():
+            current = int(sidebar.cget('width'))
+            sidebar.set_manual(False)
+            reversal.extend((current, int(sidebar.cget('width'))))
+        sidebar.set_manual(True)
+        self.root.after(90, reverse)
+        deadline = time.monotonic()+.7
+        while time.monotonic() < deadline:
+            self.root.update()
+            time.sleep(.005)
+        self.assertGreater(len(set(widths)), 3)
+        self.assertIn((0, title.winfo_width()), exposures)
+        self.assertTrue(76 < reversal[0] < 210)
+        self.assertEqual(reversal[0], reversal[1])
+        self.assertEqual(sidebar.winfo_width(), 210)
+        self.assertEqual(self.app.tabs.winfo_x(), 210)
+        self.assertIsNone(sidebar.width_job)
+        sidebar.set_manual(True)
+        job = sidebar.width_job
+        sidebar.destroy()
+        self.assertNotIn(job, self.root.tk.call('after', 'info'))
+
+    def test_background_follows_geometry_without_waiting_for_animation_end(self):
+        self.root.geometry('1180x820')
+        self.root.deiconify()
+        for name, canvas in [('course', self.app.course_page.front),
+                             ('homework', self.app.homework_panel.hero)]:
+            self.app.show_page(name)
+            self.root.update_idletasks()
+            cached = canvas.background_photo
+            for width in (205, 170, 120, 76, 140, 210):
+                self.app.sidebar.configure(width=width)
+                self.root.update_idletasks()
+                self.assertGreaterEqual(canvas.background_scaled.width, canvas.winfo_width())
+                self.assertEqual(canvas.background_scaled.height, canvas.winfo_height())
+                self.assertIs(canvas.background_photo, cached)
+                offset = canvas.background_offset[0]
+                self.assertLessEqual(offset, 0)
+                self.assertGreaterEqual(offset+canvas.background_scaled.width, canvas.winfo_width())
 
 
 if __name__ == "__main__":

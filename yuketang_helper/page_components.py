@@ -4,6 +4,7 @@ import time
 from tkinter import ttk
 from PIL import Image, ImageTk
 from .ui_shell import ASSETS, BG, MUTED, Backdrop, DocumentMark, PageStack, ActionButton
+from .scroll_widgets import OverlayScrollbar
 
 
 class FeaturePage(ttk.Frame):
@@ -55,18 +56,26 @@ class FeaturePage(ttk.Frame):
         for widget in self.extra.winfo_children():
             if isinstance(widget, ttk.Label):
                 widget.configure(wraplength=max(250, min(event.width-100, 650)))
-        if self.resize_job is not None:
-            self.after_cancel(self.resize_job)
-        self.resize_job = self.after(70, self._paint)
+        self._paint()
 
     def _paint(self):
         self.resize_job = None
-        size = (max(2, self.front.winfo_width()), max(2, self.front.winfo_height()))
-        self.front.background_scaled = self.source.resize(size, Image.Resampling.LANCZOS)
-        self.photo = ImageTk.PhotoImage(self.front.background_scaled, master=self.front)
-        self.front.delete('background')
-        self.front.create_image(0, 0, image=self.photo, anchor='nw', tags='background')
-        self.front.tag_lower('background')
+        # Keep enough artwork for either sidebar width. During a toggle only
+        # its centered crop moves; neither pixels nor Tk images are rebuilt.
+        size = (max(2, self.front.winfo_width(), self.winfo_toplevel().winfo_width()-76),
+                max(2, self.front.winfo_height()))
+        if getattr(self.front, 'background_scaled', None) is None or self.front.background_scaled.size != size:
+            self.front.background_scaled = self.source.resize(size, Image.Resampling.BILINEAR)
+            self.photo = ImageTk.PhotoImage(self.front.background_scaled, master=self.front)
+            self.front.background_photo = self.photo
+            self.front._backdrop_source = self.front.background_scaled
+        if not hasattr(self, 'background_item'):
+            self.background_item = self.front.create_image(0, 0, anchor='nw', tags='background')
+        self.front.itemconfigure(self.background_item, image=self.photo)
+        offset = (self.front.winfo_width()-size[0])//2
+        self.front.background_offset = (offset, 0)
+        self.front.coords(self.background_item, offset, 0)
+        self.front.tag_lower(self.background_item)
         self.body.refresh()
         self.content.refresh()
         self.actions.refresh()
@@ -133,14 +142,37 @@ class ScrollableForm(ttk.Frame):
     def __init__(self, parent):
         super().__init__(parent)
         self.pack(fill='both', expand=True)
-        canvas = tk.Canvas(self, bg=BG, highlightthickness=0)
-        bar = ttk.Scrollbar(self, orient='vertical', command=canvas.yview)
-        canvas.configure(yscrollcommand=bar.set)
-        bar.pack(side='right', fill='y')
+        canvas = tk.Canvas(self, bg=BG, highlightthickness=0, yscrollincrement=22)
+        self.canvas = canvas
+        self.scrollbar = OverlayScrollbar(canvas)
         canvas.pack(side='left', fill='both', expand=True)
         self.body = ttk.Frame(canvas)
         window = canvas.create_window(0, 0, anchor='nw', window=self.body)
         canvas.bind('<Configure>', lambda event: canvas.itemconfigure(window, width=event.width))
         self.body.bind('<Configure>', lambda _: canvas.configure(scrollregion=canvas.bbox('all')))
-        for widget in (canvas, self.body):
-            widget.bind('<MouseWheel>', lambda event: canvas.yview_scroll(-int(event.delta/120), 'units'))
+        self.root = self.winfo_toplevel()
+        self.wheel_bindings = []
+        for sequence in ('<MouseWheel>', '<Button-4>', '<Button-5>', '<Next>', '<Prior>'):
+            ident = self.root.bind(sequence, self._scroll, add='+')
+            self.wheel_bindings.append((sequence, ident))
+        self.bind('<Destroy>', self._cleanup, add='+')
+
+    def _scroll(self, event):
+        widget = event.widget
+        while widget is not None and widget is not self.canvas:
+            # Inner text/record widgets keep their own native wheel behavior.
+            if isinstance(widget, (tk.Text, ttk.Treeview, ttk.Combobox, ttk.Spinbox)):
+                return
+            widget = getattr(widget, 'master', None)
+        if widget is not self.canvas or not self.scrollbar.scrollable:
+            return
+        if getattr(event, 'keysym', '') in ('Next', 'Prior'):
+            self.canvas.yview_scroll(1 if event.keysym == 'Next' else -1, 'pages')
+            self.scrollbar.activity()
+            return 'break'
+        return self.scrollbar.scroll_wheel(event)
+
+    def _cleanup(self, event):
+        if event.widget is self:
+            for sequence, ident in self.wheel_bindings:
+                self.root.unbind(sequence, ident)

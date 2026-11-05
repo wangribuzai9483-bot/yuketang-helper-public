@@ -1,7 +1,8 @@
 from concurrent.futures import ThreadPoolExecutor
 import json
 import tkinter as tk
-from tkinter import messagebox, scrolledtext, ttk
+from tkinter import messagebox, ttk
+from . import scroll_widgets as scrolledtext
 from tkinter import font as tkfont
 
 from .llm import ModelClient, ModelSettings
@@ -302,20 +303,26 @@ class HomeworkPanel:
     def _draw_hero_background(self, event):
         self.hero_body.place_configure(relwidth=0, width=min(int(event.width * .86), 1000))
         self.hero_hint.configure(wraplength=max(280, min(event.width - 70, 850)))
-        if self.background_job is not None:
-            self.hero.after_cancel(self.background_job)
-        self.background_job = self.hero.after(70, self._resize_background)
+        self._resize_background()
 
     def _resize_background(self):
         self.background_job = None
         width, height = self.hero.winfo_width(), self.hero.winfo_height()
         if width < 2 or height < 2:
             return
-        self.hero.background_scaled = self.background_source.resize((width, height), Image.Resampling.LANCZOS)
-        self.background_image = ImageTk.PhotoImage(self.hero.background_scaled, master=self.hero)
-        self.hero.delete("ambient")
-        self.hero.create_image(0, 0, image=self.background_image, anchor="nw", tags="ambient")
-        self.hero.tag_lower("ambient")
+        size = (max(width, self.hero.winfo_toplevel().winfo_width()-76), height)
+        if getattr(self.hero, 'background_scaled', None) is None or self.hero.background_scaled.size != size:
+            self.hero.background_scaled = self.background_source.resize(size, Image.Resampling.BILINEAR)
+            self.background_image = ImageTk.PhotoImage(self.hero.background_scaled, master=self.hero)
+            self.hero.background_photo = self.background_image
+            self.hero._backdrop_source = self.hero.background_scaled
+        if not hasattr(self, 'background_item'):
+            self.background_item = self.hero.create_image(0, 0, anchor='nw', tags='ambient')
+        self.hero.itemconfigure(self.background_item, image=self.background_image)
+        offset = (width-size[0])//2
+        self.hero.background_offset = (offset, 0)
+        self.hero.coords(self.background_item, offset, 0)
+        self.hero.tag_lower(self.background_item)
         self.hero_body.refresh()
         self.hero_actions.refresh()
 

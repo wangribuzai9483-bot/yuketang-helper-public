@@ -94,12 +94,34 @@ class DocumentMark(tk.Canvas):
         self.animation_job = self.after(100, self._tick)
 
 
+def redraw_widget_tree(widget):
+    """Invalidate Tk's complete visible regions once, without synchronous Win32 paints."""
+    def expose(child):
+        if child.winfo_ismapped():
+            if isinstance(child, Backdrop):
+                child.refresh()
+            descendants = child.winfo_children()
+            # Frame backgrounds and the workspace image already invalidate
+            # themselves through geometry/item changes. Only repaint the
+            # moving foreground surfaces that can retain copied fragments.
+            if not isinstance(child, (tk.Frame, ttk.Frame, tk.Tk, tk.Toplevel)) and not hasattr(child, 'background_scaled'):
+                child.event_generate('<Expose>', x=0, y=0,
+                                     width=child.winfo_width(), height=child.winfo_height())
+            for descendant in descendants:
+                expose(descendant)
+    expose(widget)
+
+
 class Backdrop(tk.Canvas):
     """Render the aligned workspace asset behind child widgets without a solid panel."""
     def __init__(self, parent, workspace):
         super().__init__(parent, bg=BG, highlightthickness=0, height=1)
         self.workspace = workspace
+        self.redraw_job = None
+        self.image_item = self.create_image(0, 0, anchor='nw')
+        self.image_signature = None
         self.bind("<Configure>", lambda _: self.refresh())
+        self.bind('<Destroy>', self._cleanup_redraw, add='+')
 
     def refresh(self):
         source = getattr(self.workspace, "background_scaled", None)
@@ -107,11 +129,32 @@ class Backdrop(tk.Canvas):
             return
         x = self.winfo_rootx() - self.workspace.winfo_rootx()
         y = self.winfo_rooty() - self.workspace.winfo_rooty()
-        size = (x, y, x + self.winfo_width(), y + self.winfo_height())
-        self.photo = ImageTk.PhotoImage(source.crop(size), master=self)
-        self.delete("backdrop")
-        self.create_image(0, 0, image=self.photo, anchor="nw", tags="backdrop")
-        self.tag_lower("backdrop")
+        # All nested containers share the workspace's one Tk image. Canvas
+        # clipping handles the crop; uncovered pixels use its normal BG color.
+        if getattr(self.workspace, '_backdrop_source', None) is not source:
+            self.workspace.background_photo = ImageTk.PhotoImage(source, master=self.workspace)
+            self.workspace._backdrop_source = source
+        self.photo = self.workspace.background_photo
+        offset_x, offset_y = getattr(self.workspace, 'background_offset', (0, 0))
+        signature = (str(self.photo), offset_x-x, offset_y-y)
+        if signature == self.image_signature:
+            return
+        self.image_signature = signature
+        self.coords(self.image_item, offset_x-x, offset_y-y)
+        self.itemconfigure(self.image_item, image=self.photo)
+        self.tag_lower(self.image_item)
+
+    def _redraw_children(self):
+        self.redraw_job = None
+        # Moving nested Canvas windows can copy stale child pixels on Windows.
+        # Invalidate the complete subtree after geometry and image updates;
+        # repaint the actual labels/buttons instead of keeping copied fragments.
+        redraw_widget_tree(self)
+
+    def _cleanup_redraw(self, event):
+        if event.widget is self and self.redraw_job is not None:
+            self.after_cancel(self.redraw_job)
+            self.redraw_job = None
 
 
 class FlowConnector(tk.Canvas):
@@ -385,6 +428,24 @@ def apply_theme(root, style):
     style.map("TButton", background=[("active", "#E5E3DE")])
     style.configure("TEntry", fieldbackground=SURFACE, bordercolor=LINE,
                     lightcolor=LINE, darkcolor=LINE, relief="flat", padding=7)
+    style.configure("Polished.TCombobox", font=("Microsoft YaHei UI", 10),
+                    foreground=INK, fieldbackground=SURFACE, background=SURFACE,
+                    arrowcolor=INK, arrowsize='12p', padding=(10, 7, 8, 7),
+                    borderwidth=1, bordercolor=LINE, lightcolor=LINE, darkcolor=LINE,
+                    relief="flat")
+    style.map("Polished.TCombobox",
+              foreground=[("disabled", MUTED), ("readonly", INK)],
+              fieldbackground=[("readonly", SURFACE), ("disabled", SOFT)],
+              background=[("active", SOFT), ("readonly", SURFACE)],
+              arrowcolor=[("disabled", MUTED), ("active", INK)],
+              bordercolor=[("focus", "#8F8A80"), ("active", "#C9C4BB")],
+              lightcolor=[("focus", "#8F8A80"), ("active", "#C9C4BB")],
+              darkcolor=[("focus", "#8F8A80"), ("active", "#C9C4BB")])
+    root.option_add("*TCombobox*Listbox.background", SURFACE)
+    root.option_add("*TCombobox*Listbox.foreground", INK)
+    root.option_add("*TCombobox*Listbox.selectBackground", SOFT)
+    root.option_add("*TCombobox*Listbox.selectForeground", INK)
+    root.option_add("*TCombobox*Listbox.font", "{Microsoft YaHei UI} 10")
     style.configure("TCheckbutton", background=BG, foreground=INK)
     style.configure('Workbench.TMenubutton', background=BG, foreground=INK, padding=(12, 9),
                     bordercolor=LINE, lightcolor=LINE, darkcolor=LINE, relief='flat')
@@ -392,11 +453,32 @@ def apply_theme(root, style):
     style.configure("TNotebook", background=BG, borderwidth=0)
     style.configure("TNotebook.Tab", padding=(15, 9))
     style.map('TNotebook.Tab', background=[('selected', SOFT)], foreground=[('selected', INK)])
+    style.configure('Learning.TNotebook', background=BG, borderwidth=0, relief='flat')
+    style.configure('Learning.TNotebook.Tab', font=('Microsoft YaHei UI', 10),
+                    padding=(18, 10), background=SOFT, foreground=MUTED,
+                    borderwidth=1, bordercolor=LINE, lightcolor=LINE, darkcolor=LINE)
+    style.map('Learning.TNotebook.Tab',
+              background=[('selected', SURFACE), ('active', '#F8F7F4')],
+              foreground=[('selected', INK), ('active', INK)],
+              bordercolor=[('selected', LINE), ('active', '#C9C4BB')],
+              lightcolor=[('selected', LINE)], darkcolor=[('selected', LINE)])
     style.configure('Treeview', rowheight=32, background='#FCFBFA', fieldbackground='#FCFBFA',
                     foreground=INK, borderwidth=0, font=('Microsoft YaHei UI', 10))
     style.configure('Treeview.Heading', background=SOFT, foreground=INK, padding=(10, 8),
                     font=('Microsoft YaHei UI', 10, 'bold'), relief='flat')
     style.map('Treeview', background=[('selected', '#EAE5DB')], foreground=[('selected', INK)])
+    style.configure('Learning.Treeview', background=SURFACE, fieldbackground=SURFACE,
+                    foreground=INK, borderwidth=0, bordercolor=LINE,
+                    lightcolor=LINE, darkcolor=LINE, rowheight=34,
+                    font=('Microsoft YaHei UI', 10))
+    style.configure('Learning.Treeview.Heading', background=SOFT, foreground=INK,
+                    borderwidth=0, bordercolor=LINE, lightcolor=LINE, darkcolor=LINE,
+                    relief='flat', padding=(12, 10), font=('Microsoft YaHei UI', 10, 'bold'))
+    style.map('Learning.Treeview', background=[('selected', '#EAE5DB')],
+              foreground=[('selected', INK)])
+    style.configure('Learning.Horizontal.TScrollbar', background='#D4D0C8',
+                    troughcolor=SOFT, bordercolor=LINE, lightcolor=LINE,
+                    darkcolor=LINE, arrowcolor=MUTED, arrowsize=9, width=10)
     style.configure("Title.TLabel", font=("Microsoft YaHei UI", 19, "bold"))
     style.configure("Status.TLabel", font=("Microsoft YaHei UI", 12, "bold"))
     style.configure('Horizontal.TProgressbar', troughcolor=SOFT, background='#C4A46A',
@@ -494,6 +576,9 @@ class Sidebar(tk.Frame):
         self.hover_progress = {}
         self.tip = None
         self.tip_after = None
+        self.width_job = None
+        self.width_target = 210
+        self.bind('<Destroy>', self._cleanup_width, add='+')
         self.configure(width=210)
         self.pack_propagate(False)
         head = tk.Frame(self, bg=SURFACE, height=66)
@@ -552,7 +637,7 @@ class Sidebar(tk.Frame):
         for key in self.animation_generation:
             self.animation_generation[key] += 1
         collapsed = self.collapsed
-        self.configure(width=76 if collapsed else 210)
+        self._animate_width(76 if collapsed else 210)
         if collapsed:
             self.brand.pack_forget()
         else:
@@ -561,6 +646,43 @@ class Sidebar(tk.Frame):
             hint.place_forget()
             name.place_forget() if collapsed else name.place(x=57, y=19, width=135, height=25)
         self.mark(self.selected)
+
+    def _animate_width(self, target):
+        if target == self.width_target:
+            return
+        self.width_target = target
+        if self.width_job is not None:
+            self.after_cancel(self.width_job)
+            self.width_job = None
+        start = int(self.cget('width'))
+        if not self.winfo_ismapped():
+            self.configure(width=target)
+            return
+        started = time.monotonic()
+
+        def frame():
+            frame_started = time.monotonic()
+            progress = min(1, (time.monotonic()-started)/.26)
+            eased = progress*progress*(3-2*progress)
+            self.configure(width=round(start+(target-start)*eased))
+            # Complete this frame's geometry, background and child invalidation
+            # before scheduling the next width. Timer callbacks must not race
+            # ahead of Tk's idle geometry/painting work on a busy Windows UI.
+            self.update_idletasks()
+            redraw_widget_tree(self.winfo_toplevel())
+            self.update_idletasks()
+            if progress < 1:
+                delay = max(1, round(16-(time.monotonic()-frame_started)*1000))
+                self.width_job = self.after(delay, frame)
+            else:
+                self.width_job = None
+        frame()
+
+    def _cleanup_width(self, event):
+        if event.widget is self:
+            if self.width_job is not None:
+                self.after_cancel(self.width_job)
+                self.width_job = None
 
     def mark(self, key):
         self.selected = key

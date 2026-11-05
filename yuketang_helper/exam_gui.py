@@ -1,7 +1,8 @@
 from dataclasses import replace
 import json
 import tkinter as tk
-from tkinter import scrolledtext, ttk
+from tkinter import ttk
+from . import scroll_widgets as scrolledtext
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 from .homework_gui import TYPE_NAMES, HomeworkPanel

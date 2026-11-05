@@ -1,6 +1,8 @@
 """Browse local question records, review jobs and editable experience notes."""
 import json
-from tkinter import messagebox, scrolledtext, ttk
+from tkinter import messagebox, ttk
+from . import scroll_widgets as scrolledtext
+from .scroll_widgets import OverlayScrollbar
 import tkinter as tk
 from .page_components import Disclosure
 from .ui_shell import DocumentMark, MUTED
@@ -33,7 +35,7 @@ class LearningPanel:
         ttk.Label(controls,text='搜索').pack(side='left',padx=(10,4))
         entry=ttk.Entry(controls,textvariable=self.search);entry.pack(side='left',fill='x',expand=True)
         entry.bind('<Return>',lambda _:self.refresh())
-        self.tabs=ttk.Notebook(parent);self.tabs.pack(fill='both',expand=True,padx=14,pady=10)
+        self.tabs=ttk.Notebook(parent,style='Learning.TNotebook');self.tabs.pack(fill='both',expand=True,padx=14,pady=10)
         records=ttk.Frame(self.tabs);experiences=ttk.Frame(self.tabs)
         self.tabs.add(records,text='已做题记录');self.tabs.add(experiences,text='经验清单')
         self.records=self._table(records,('course','assignment','stem','status'),('课程','作业','题目','状态'))
@@ -60,13 +62,16 @@ class LearningPanel:
     @staticmethod
     def _table(parent, columns, labels):
         box=ttk.Frame(parent);box.pack(fill='x')
-        tree=ttk.Treeview(box,columns=columns,show='headings',height=5,selectmode='browse')
+        tree=ttk.Treeview(box,columns=columns,show='headings',height=5,
+                          selectmode='browse',style='Learning.Treeview')
         for col,label in zip(columns,labels):
             tree.heading(col,text=label);tree.column(col,width=150 if col!='stem' else 280,minwidth=65)
-        bar=ttk.Scrollbar(box,orient='vertical',command=tree.yview);tree.configure(yscrollcommand=bar.set)
-        horizontal=ttk.Scrollbar(box,orient='horizontal',command=tree.xview);tree.configure(xscrollcommand=horizontal.set)
+        tree.scrollbar=OverlayScrollbar(tree, below_header=True)
+        horizontal=ttk.Scrollbar(box,orient='horizontal',command=tree.xview,
+                                 style='Learning.Horizontal.TScrollbar')
+        tree.configure(xscrollcommand=horizontal.set)
         box.columnconfigure(0,weight=1)
-        tree.grid(row=0,column=0,sticky='nsew');bar.grid(row=0,column=1,sticky='ns');horizontal.grid(row=1,column=0,sticky='ew')
+        tree.grid(row=0,column=0,sticky='nsew');horizontal.grid(row=1,column=0,sticky='ew')
         return tree
 
     @staticmethod

@@ -1,6 +1,7 @@
 """Advanced homework controls; every action delegates to the existing panel."""
 import tkinter as tk
-from tkinter import ttk, scrolledtext
+from tkinter import ttk
+from . import scroll_widgets as scrolledtext
 from .ui_shell import ActionButton, InputCard, PageStack, BG, INK, MUTED, LINE
 
 
